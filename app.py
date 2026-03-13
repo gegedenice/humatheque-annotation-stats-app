@@ -21,7 +21,7 @@ import plotly.express as px
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
 
-st.set_page_config(page_title="VLM Layout Explorer", layout="wide")
+st.set_page_config(page_title="Layout Blocks Explorer", layout="wide")
 
 # -----------------------
 # Env / DB config
@@ -173,7 +173,7 @@ dff = df.loc[mask].copy()
 # -----------------------
 # Header KPIs
 # -----------------------
-st.title("VLM Layout Explorer — stats sur blocs annotés (DB)")
+st.title("Layout Blocks Explorer — Statistiques sur blocs annotés")
 
 c1, c2, c3, c4 = st.columns(4)
 c1.metric("Annotations (lignes)", f"{len(dff):,}".replace(",", " "))

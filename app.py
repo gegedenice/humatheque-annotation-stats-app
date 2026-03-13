@@ -311,7 +311,7 @@ with tab2:
         )
         st.plotly_chart(figx, width="stretch")
 
-    st.caption("Lecture : un bloc 'stable' = distribution serrée ⇒ bon candidat pour extraction guidée / cropping.")
+    st.caption("Interprétation : un bloc 'stable' = distribution serrée")
 
     st.subheader("Comparaisons (facettes)")
     colA, colB = st.columns(2)
@@ -370,7 +370,7 @@ with tab3:
         st.write("Docs avec le plus de blocs atypiques (souvent : scans bizarres, page non-standard, etc.)")
         st.dataframe(per_case.head(30), width="stretch")
 
-    st.caption("Usage VLM : les outliers = cas de robustesse. Tu peux décider d'un fallback (prompt global, OCR, ou extraction par zones).")
+    st.caption("Interprétation : les outliers = cas de robustesse.")
 
 # ---- Tab 4: “zones probables”
 with tab4:
@@ -437,7 +437,7 @@ with tab4:
             width="stretch"
         )
 
-    st.caption("Ces zones probables sont directement réutilisables pour un pipeline VLM 'cropped' (crop → extraction champ par champ).")
+    st.caption("Usage VLM: les zones probables sont directement réutilisables pour un pipeline VLM 'cropped' (crop → extraction champ par champ).")
 
 # ---- Tab 5: “Couverture / données manquantes”    
 with tab5:

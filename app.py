@@ -40,7 +40,7 @@ DB_SCHEMA = os.getenv("DB_SCHEMA", "vlm_eval").strip()
 # Data loader
 # -----------------------
 @st.cache_data(show_spinner=False)
-def load_from_db(db_url: str, schema: str) -> pd.DataFrame:
+def load_from_db(db_url: str, schema: str) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Requires:
       pip install sqlalchemy psycopg2-binary python-dotenv
@@ -54,7 +54,7 @@ def load_from_db(db_url: str, schema: str) -> pd.DataFrame:
 
     engine = create_engine(db_url)
 
-    q = text(f"""
+    q_annotations = text(f"""
         SELECT
           -- stringify IDs to avoid UUID not JSON serializable
           CAST(lan.layout_annotation_id AS text) AS layout_annotation_id,
@@ -84,8 +84,22 @@ def load_from_db(db_url: str, schema: str) -> pd.DataFrame:
         JOIN {schema}.cases c
           ON c.case_id = CAST(lan.case_id AS uuid)
     """)
+    q_cases = text(f"""
+        SELECT
+          CAST(c.case_id AS text) AS case_id,
+          c.case_name,
+          c.doc_type,
+          c.memoire_type_code,
+          c.year,
+          c.collection_code,
+          c.is_humatheque,
+          c.source_ref,
+          c.created_at
+        FROM {schema}.cases c
+    """)
     with engine.begin() as cx:
-        df = pd.read_sql(q, cx)
+        df = pd.read_sql(q_annotations, cx)
+        cases_df = pd.read_sql(q_cases, cx)
 
     # typing
     for col in ["x1n", "y1n", "x2n", "y2n", "cxn", "cyn"]:
@@ -93,11 +107,15 @@ def load_from_db(db_url: str, schema: str) -> pd.DataFrame:
             df[col] = pd.to_numeric(df[col], errors="coerce")
     if "year" in df.columns:
         df["year"] = pd.to_numeric(df["year"], errors="coerce")
+    if "year" in cases_df.columns:
+        cases_df["year"] = pd.to_numeric(cases_df["year"], errors="coerce")
     if "is_humatheque" in df.columns:
         # keep boolean, but tolerate strings
         if df["is_humatheque"].dtype == object:
             df["is_humatheque"] = df["is_humatheque"].astype(str).str.lower().map({"true": True, "false": False})
-    return df
+    if "is_humatheque" in cases_df.columns and cases_df["is_humatheque"].dtype == object:
+        cases_df["is_humatheque"] = cases_df["is_humatheque"].astype(str).str.lower().map({"true": True, "false": False})
+    return df, cases_df
 
 def ensure_bbox(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
@@ -106,7 +124,7 @@ def ensure_bbox(df: pd.DataFrame) -> pd.DataFrame:
     df["barea"] = (df["bw"] * df["bh"]).clip(lower=0)
     return df
 
-df = load_from_db(DB_URL, DB_SCHEMA)
+df, cases_df = load_from_db(DB_URL, DB_SCHEMA)
 df = ensure_bbox(df)
 
 # Canonical block display label
@@ -131,16 +149,19 @@ sel_block_display = st.sidebar.multiselect("Blocs", block_display_list, default=
 sel_block_codes = set(block_options[block_options["block_display"].isin(sel_block_display)]["block"].tolist())
 
 mask = df["block"].isin(sel_block_codes)
+cases_mask = pd.Series(True, index=cases_df.index)
 
 # doc_type facet
-doc_types = sorted([x for x in df["doc_type"].dropna().unique().tolist()])
+doc_types = sorted([x for x in cases_df["doc_type"].dropna().unique().tolist()])
 if doc_types:
     sel_doc_types = st.sidebar.multiselect("doc_type", doc_types, default=doc_types)
     mask &= df["doc_type"].isin(sel_doc_types)
+    if "doc_type" in cases_df.columns:
+        cases_mask &= cases_df["doc_type"].isin(sel_doc_types)
 
 # memoire_type_code facet
-memoire_types = sorted([x for x in df["memoire_type_code"].dropna().unique().tolist()])
-if df["memoire_type_code"].isna().any():
+memoire_types = sorted([x for x in cases_df["memoire_type_code"].dropna().unique().tolist()])
+if cases_df["memoire_type_code"].isna().any():
     memoire_types = memoire_types + ["(null)"]
 if memoire_types:
     sel_memoire_types = st.sidebar.multiselect("memoire_type_code", memoire_types, default=memoire_types)
@@ -148,27 +169,36 @@ if memoire_types:
     if "(null)" in sel_memoire_types:
         memoire_mask |= df["memoire_type_code"].isna()
     mask &= memoire_mask
+    cases_memoire_mask = cases_df["memoire_type_code"].isin([x for x in sel_memoire_types if x != "(null)"])
+    if "(null)" in sel_memoire_types:
+        cases_memoire_mask |= cases_df["memoire_type_code"].isna()
+    cases_mask &= cases_memoire_mask
 
 # is_humatheque facet
-if df["is_humatheque"].notna().any():
+if cases_df["is_humatheque"].notna().any():
     sel_huma = st.sidebar.selectbox("is_humatheque", ["(tous)", True, False], index=0)
     if sel_huma != "(tous)":
         mask &= (df["is_humatheque"] == sel_huma)
+        cases_mask &= (cases_df["is_humatheque"] == sel_huma)
 
 # collection_code facet
-collections = sorted([x for x in df["collection_code"].dropna().unique().tolist()])
+collections = sorted([x for x in cases_df["collection_code"].dropna().unique().tolist()])
 if collections:
     sel_cols = st.sidebar.multiselect("collection_code", collections, default=collections)
     mask &= df["collection_code"].isin(sel_cols)
+    if "collection_code" in cases_df.columns:
+        cases_mask &= cases_df["collection_code"].isin(sel_cols)
 
 # year facet (range)
-if df["year"].notna().any():
-    y_min = int(np.nanmin(df["year"]))
-    y_max = int(np.nanmax(df["year"]))
+if cases_df["year"].notna().any():
+    y_min = int(np.nanmin(cases_df["year"]))
+    y_max = int(np.nanmax(cases_df["year"]))
     yr = st.sidebar.slider("Années", min_value=y_min, max_value=y_max, value=(y_min, y_max))
     mask &= df["year"].between(yr[0], yr[1])
+    cases_mask &= cases_df["year"].between(yr[0], yr[1])
 
 dff = df.loc[mask].copy()
+cases_ff = cases_df.loc[cases_mask].copy()
 
 # -----------------------
 # Header KPIs
@@ -177,7 +207,7 @@ st.title("Layout Blocks Explorer — Statistiques sur blocs annotés")
 
 c1, c2, c3, c4 = st.columns(4)
 c1.metric("Annotations (lignes)", f"{len(dff):,}".replace(",", " "))
-c2.metric("Docs (case_id)", f"{dff['case_id'].nunique():,}".replace(",", " "))
+c2.metric("Docs (case_id)", f"{cases_ff['case_id'].nunique():,}".replace(",", " "))
 c3.metric("Types de blocs", f"{dff['block'].nunique():,}".replace(",", " "))
 c4.metric("Campagnes", f"{dff['campaign_id'].nunique():,}".replace(",", " "))
 
@@ -444,7 +474,7 @@ with tab5:
     st.subheader("Couverture des blocs (présence/absence)")
 
     # nombre total de docs dans le sous-corpus filtré
-    total_docs = dff["case_id"].nunique()
+    total_docs = cases_ff["case_id"].nunique()
 
     # coverage par bloc : nb docs où le bloc est présent
     cov = (
@@ -488,7 +518,7 @@ with tab5:
     fig2.update_layout(xaxis_title=None, yaxis_title="n_docs")
     st.plotly_chart(fig2, width="stretch")
 
-    docs_meta = dff[["case_id", "memoire_type_code"]].drop_duplicates()
+    docs_meta = cases_ff[["case_id", "memoire_type_code"]].drop_duplicates()
     docs_meta["memoire_type_code_display"] = docs_meta["memoire_type_code"].fillna("(null)")
     if docs_meta["memoire_type_code"].notna().any():
         memoire_counts = (
@@ -510,7 +540,7 @@ with tab5:
     st.subheader("Couverture par facette")
 
     facet_options = ["doc_type", "is_humatheque", "collection_code", "year"]
-    if dff["memoire_type_code"].notna().any():
+    if cases_ff["memoire_type_code"].notna().any():
         facet_options.append("memoire_type_code")
 
     facet = st.selectbox("Facette", facet_options, index=0)
@@ -518,7 +548,7 @@ with tab5:
     if facet in dff.columns:
         # coverage rate par bloc *et* facette
         # calc : docs total par facette
-        total_by_f = dff.groupby(facet)["case_id"].nunique().reset_index(name="total_docs")
+        total_by_f = cases_ff.groupby(facet)["case_id"].nunique().reset_index(name="total_docs")
 
         # docs couverts par bloc et facette
         cov_by = (
@@ -570,7 +600,7 @@ with tab5:
 
         # total docs par facette
         total_by_f = (
-            dff.groupby(facet2)["case_id"]
+            cases_ff.groupby(facet2)["case_id"]
             .nunique()
             .reset_index(name="total_docs")
         )

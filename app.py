@@ -23,6 +23,10 @@ from sqlalchemy import create_engine, text
 
 st.set_page_config(page_title="Layout Blocks Explorer", layout="wide")
 
+def refresh_data() -> None:
+    load_from_db.clear()
+    st.cache_data.clear()
+    
 # -----------------------
 # Env / DB config
 # -----------------------

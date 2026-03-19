@@ -207,7 +207,14 @@ cases_ff["image_url"] = cases_ff["source_ref"].apply(
 # -----------------------
 # Header KPIs
 # -----------------------
-st.title("Layout Blocks Explorer — Statistiques sur blocs annotés")
+title_col, refresh_col = st.columns([6, 1])
+with title_col:
+    st.title("Layout Blocks Explorer — Statistiques sur blocs annotés")
+with refresh_col:
+    st.write("")
+    if st.button("Refresh", use_container_width=True, help="Recharge les données depuis la base et met à jour tous les compteurs."):
+        refresh_data()
+        st.rerun()
 
 c1, c2, c3, c4 = st.columns(4)
 c1.metric("Annotations (lignes)", f"{len(dff):,}".replace(",", " "))
@@ -1180,7 +1187,7 @@ with tab6:
     thumb_count = st.slider(
         "Nombre de vignettes",
         min_value=4,
-        max_value=24,
+        max_value=50,
         value=8,
         step=4,
         key="search_thumb_count"
